@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, ArrowLeft, Download, BookOpen, Lightbulb, HelpCircle, Network, Image as ImageIcon, MessageCircle, X } from "lucide-react";
+import { Loader2, ArrowLeft, Download, BookOpen, Lightbulb, HelpCircle, Network, MessageCircle, X } from "lucide-react";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+import MindMap from "@/components/MindMap";
 // Gemini Chatbot UI for note-specific chat
 import { useRef } from "react";
 // Gemini Chatbot Component with floating button
@@ -206,9 +209,56 @@ const NoteDetail = () => {
 
   const handleDownloadPDF = async () => {
     if (!note) return;
-    
-    toast.info("PDF export coming soon!");
-    // TODO: Implement PDF generation with jsPDF or similar
+    const contentEl = document.getElementById("note-detail-content");
+    if (!contentEl) {
+      toast.error("Could not find content to export");
+      console.error("PDF Export Error: #note-detail-content not found");
+      return;
+    }
+    toast.info("Generating PDF...");
+    try {
+      let canvas, imgData, pdf, pageWidth, imgWidth, imgHeight;
+      try {
+        canvas = await html2canvas(contentEl, { scale: 2 });
+        imgData = canvas.toDataURL("image/png");
+        pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+        pageWidth = pdf.internal.pageSize.getWidth();
+        imgWidth = pageWidth - 40;
+        imgHeight = (canvas.height * imgWidth) / canvas.width;
+        pdf.addImage(imgData, "PNG", 20, 20, imgWidth, imgHeight);
+      } catch (mainErr) {
+        toast.error("Failed to render main content for PDF");
+        console.error("PDF Export Error: Main content rendering failed", mainErr);
+        return;
+      }
+
+      // Only add chatbot content if present
+      const chatEl = document.getElementById("gemini-chat-content");
+      if (chatEl) {
+        try {
+          pdf.addPage();
+          const chatCanvas = await html2canvas(chatEl, { scale: 2 });
+          const chatImg = chatCanvas.toDataURL("image/png");
+          const chatImgWidth = pageWidth - 40;
+          const chatImgHeight = (chatCanvas.height * chatImgWidth) / chatCanvas.width;
+          pdf.addImage(chatImg, "PNG", 20, 20, chatImgWidth, chatImgHeight);
+        } catch (chatErr) {
+          toast.error("Failed to render chatbot for PDF. Downloading main content only.");
+          console.error("PDF Export Error: Chatbot rendering failed", chatErr);
+        }
+      }
+
+      try {
+        pdf.save(`${note.title || "note"}.pdf`);
+        toast.success("PDF downloaded!");
+      } catch (saveErr) {
+        toast.error("Failed to save PDF file");
+        console.error("PDF Export Error: Saving PDF failed", saveErr);
+      }
+    } catch (err) {
+      toast.error("PDF export failed (unexpected error)");
+      console.error("PDF Export Error: Unexpected error", err);
+    }
   };
 
   if (loading) {
@@ -230,7 +280,7 @@ const NoteDetail = () => {
           {t("processing")}
         </div>
       )}
-      <header className="border-b bg-card shadow-card">
+  <header className="border-b bg-card shadow-card">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <Button variant="ghost" onClick={() => navigate("/dashboard")}> 
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -243,7 +293,7 @@ const NoteDetail = () => {
         </div>
       </header>
 
-  <main className="container mx-auto px-4 py-8 max-w-5xl">
+  <main id="note-detail-content" className="container mx-auto px-4 py-8 max-w-5xl">
         <div className="mb-6 animate-fade-in">
           <h1 className="text-4xl font-bold mb-2">{note.title}</h1>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -270,10 +320,6 @@ const NoteDetail = () => {
             <TabsTrigger value="mindmap">
               <Network className="h-4 w-4 mr-2" />
               {t("mind_map")}
-            </TabsTrigger>
-            <TabsTrigger value="images">
-              <ImageIcon className="h-4 w-4 mr-2" />
-              {t("images")}
             </TabsTrigger>
           </TabsList>
 
@@ -359,37 +405,18 @@ const NoteDetail = () => {
                 <CardTitle>{t("mind_map")}</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="bg-muted rounded-lg p-8 text-center min-h-[400px] flex items-center justify-center">
-                  <p className="text-muted-foreground">
-                    {t("mind_map_coming_soon")}
-                  </p>
-                </div>
+                <MindMap
+                  summary={i18n.language === "en" ? note.summary : translated.summary}
+                  keyPoints={i18n.language === "en" ? note.key_points : translated.key_points}
+                />
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="images">
-            <Card className="shadow-card">
-              <CardHeader>
-                <CardTitle>{t("ai_generated_illustrations")}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {note.ai_images && note.ai_images.length > 0 ? (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {note.ai_images.map((img, i) => (
-                      <img key={i} src={img} alt={`${t("illustration")} ${i + 1}`} className="rounded-lg shadow" />
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground">{t("no_images")}</p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
         </Tabs>
       </main>
       {/* Gemini Chatbot for this note */}
-      {note && <GeminiChat note={note} />}
+  {note && <div id="gemini-chat-content"><GeminiChat note={note} /></div>}
     </div>
   );
 };
