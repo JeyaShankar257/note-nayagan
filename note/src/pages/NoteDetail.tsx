@@ -132,6 +132,31 @@ const NoteDetail = () => {
     questions?: { question: string; context?: string }[];
   }>({});
   const [translating, setTranslating] = useState(false);
+  // AI Mind Map state
+  const [aiMindMap, setAiMindMap] = useState<{ summary: string; key_points: string[] } | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  // AI Mind Map generation handler
+  const handleGenerateMindMapAI = async () => {
+    if (!note) return;
+    setAiLoading(true);
+    setAiMindMap(null);
+    try {
+      const noteText = [note.summary, ...(note.key_points || []), ...(note.questions?.map(q => q.question) || [])].filter(Boolean).join("\n");
+      const res = await fetch("/api/gemini-mindmap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: noteText })
+      });
+      if (!res.ok) throw new Error("AI mind map generation failed");
+      const data = await res.json();
+      setAiMindMap({ summary: data.summary, key_points: data.key_points });
+      toast.success("AI mind map generated!");
+    } catch (err) {
+      toast.error("AI mind map generation failed");
+    } finally {
+      setAiLoading(false);
+    }
+  };
   const GEMINI_API_KEY = "AIzaSyDObh8JdHfsxFsBC5NN8KWj25576_c9xOc";
 
   useEffect(() => {
@@ -210,42 +235,57 @@ const NoteDetail = () => {
   const handleDownloadPDF = async () => {
     if (!note) return;
     const contentEl = document.getElementById("note-detail-content");
+    const mindMapEl = document.getElementById("note-mindmap-export");
     if (!contentEl) {
       toast.error("Could not find content to export");
       console.error("PDF Export Error: #note-detail-content not found");
       return;
     }
+    if (!mindMapEl) {
+      toast.error("Could not find mind map to export");
+      console.error("PDF Export Error: #note-mindmap-export not found");
+      return;
+    }
     toast.info("Generating PDF...");
     try {
       let canvas, imgData, pdf, pageWidth, imgWidth, imgHeight;
+      // Export main content (excluding mind map section)
       try {
-        canvas = await html2canvas(contentEl, { scale: 2 });
+        // Clone contentEl and remove mind map section for first page
+        const clone = contentEl.cloneNode(true) as HTMLElement;
+        const mindMapSection = (clone as HTMLElement).querySelector('#note-mindmap-export');
+        if (mindMapSection && mindMapSection.parentNode) mindMapSection.parentNode.removeChild(mindMapSection);
+        // Create a temporary container to render the clone
+        const tempDiv = document.createElement('div');
+        tempDiv.style.position = 'absolute';
+        tempDiv.style.left = '-9999px';
+        tempDiv.appendChild(clone);
+        document.body.appendChild(tempDiv);
+        canvas = await html2canvas(clone, { scale: 2 });
         imgData = canvas.toDataURL("image/png");
         pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
         pageWidth = pdf.internal.pageSize.getWidth();
         imgWidth = pageWidth - 40;
         imgHeight = (canvas.height * imgWidth) / canvas.width;
         pdf.addImage(imgData, "PNG", 20, 20, imgWidth, imgHeight);
+        document.body.removeChild(tempDiv);
       } catch (mainErr) {
         toast.error("Failed to render main content for PDF");
         console.error("PDF Export Error: Main content rendering failed", mainErr);
         return;
       }
 
-      // Only add chatbot content if present
-      const chatEl = document.getElementById("gemini-chat-content");
-      if (chatEl) {
-        try {
-          pdf.addPage();
-          const chatCanvas = await html2canvas(chatEl, { scale: 2 });
-          const chatImg = chatCanvas.toDataURL("image/png");
-          const chatImgWidth = pageWidth - 40;
-          const chatImgHeight = (chatCanvas.height * chatImgWidth) / chatCanvas.width;
-          pdf.addImage(chatImg, "PNG", 20, 20, chatImgWidth, chatImgHeight);
-        } catch (chatErr) {
-          toast.error("Failed to render chatbot for PDF. Downloading main content only.");
-          console.error("PDF Export Error: Chatbot rendering failed", chatErr);
-        }
+      // Export mind map section on second page
+      try {
+        pdf.addPage();
+        const mindMapCanvas = await html2canvas(mindMapEl, { scale: 2 });
+        const mindMapImg = mindMapCanvas.toDataURL("image/png");
+        const mindMapImgWidth = pageWidth - 40;
+        const mindMapImgHeight = (mindMapCanvas.height * mindMapImgWidth) / mindMapCanvas.width;
+        pdf.addImage(mindMapImg, "PNG", 20, 20, mindMapImgWidth, mindMapImgHeight);
+      } catch (mmErr) {
+        toast.error("Failed to render mind map for PDF. Downloading main content only.");
+        console.error("PDF Export Error: Mind map rendering failed", mmErr);
       }
 
       try {
@@ -280,7 +320,7 @@ const NoteDetail = () => {
           {t("processing")}
         </div>
       )}
-  <header className="border-b bg-card shadow-card">
+      <header className="border-b bg-card shadow-card">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <Button variant="ghost" onClick={() => navigate("/dashboard")}> 
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -293,7 +333,8 @@ const NoteDetail = () => {
         </div>
       </header>
 
-  <main id="note-detail-content" className="container mx-auto px-4 py-8 max-w-5xl">
+      {/* Visible main content with tabs */}
+      <main className="container mx-auto px-4 py-8 max-w-5xl">
         <div className="mb-6 animate-fade-in">
           <h1 className="text-4xl font-bold mb-2">{note.title}</h1>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -302,7 +343,6 @@ const NoteDetail = () => {
             <span>{new Date(note.created_at).toLocaleDateString()}</span>
           </div>
         </div>
-
         <Tabs defaultValue="summary" className="animate-scale-in">
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="summary">
@@ -322,7 +362,6 @@ const NoteDetail = () => {
               {t("mind_map")}
             </TabsTrigger>
           </TabsList>
-
           <TabsContent value="summary" className="space-y-4">
             <Card className="shadow-card">
               <CardHeader>
@@ -336,7 +375,6 @@ const NoteDetail = () => {
                 </p>
               </CardContent>
             </Card>
-
             {note.keywords && note.keywords.length > 0 && (
               <Card className="shadow-card">
                 <CardHeader>
@@ -352,7 +390,6 @@ const NoteDetail = () => {
               </Card>
             )}
           </TabsContent>
-
           <TabsContent value="keypoints">
             <Card className="shadow-card">
               <CardHeader>
@@ -374,7 +411,6 @@ const NoteDetail = () => {
               </CardContent>
             </Card>
           </TabsContent>
-
           <TabsContent value="questions">
             <Card className="shadow-card">
               <CardHeader>
@@ -398,25 +434,95 @@ const NoteDetail = () => {
               </CardContent>
             </Card>
           </TabsContent>
-
           <TabsContent value="mindmap">
             <Card className="shadow-card">
-              <CardHeader>
+              <CardHeader className="flex flex-col gap-2">
                 <CardTitle>{t("mind_map")}</CardTitle>
+                <Button onClick={handleGenerateMindMapAI} disabled={aiLoading} size="sm" className="w-fit">
+                  {aiLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  {t("Generate Mind Map with AI")}
+                </Button>
               </CardHeader>
               <CardContent>
                 <MindMap
-                  summary={i18n.language === "en" ? note.summary : translated.summary}
-                  keyPoints={i18n.language === "en" ? note.key_points : translated.key_points}
+                  summary={aiMindMap ? aiMindMap.summary : (i18n.language === "en" ? note.summary : translated.summary)}
+                  keyPoints={aiMindMap ? aiMindMap.key_points : (i18n.language === "en" ? note.key_points : translated.key_points)}
                 />
               </CardContent>
             </Card>
           </TabsContent>
-
         </Tabs>
       </main>
+
+      {/* Hidden export container with all tab contents for PDF export */}
+  <div id="note-detail-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '210mm', background: 'white', zIndex: -1 }} aria-hidden="true">
+        <div className="mb-6">
+          <h1 className="text-4xl font-bold mb-2">{note.title}</h1>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Badge>{note.source_type}</Badge>
+            <span>•</span>
+            <span>{new Date(note.created_at).toLocaleDateString()}</span>
+          </div>
+        </div>
+        {/* All tab contents rendered together */}
+        <section style={{ marginBottom: '2rem' }}>
+          <h2 className="text-2xl font-semibold mb-2">{t("summary")}</h2>
+          <p className="text-base leading-relaxed whitespace-pre-wrap">
+            {i18n.language === "en"
+              ? note.summary || t("processing")
+              : translated.summary || t("processing")}
+          </p>
+          {note.keywords && note.keywords.length > 0 && (
+            <div style={{ marginTop: '1rem' }}>
+              <strong>{t("keywords")}: </strong>
+              {note.keywords.map((keyword, i) => (
+                <span key={i} style={{ marginRight: 8 }}>{keyword}</span>
+              ))}
+            </div>
+          )}
+        </section>
+        <section style={{ marginBottom: '2rem' }}>
+          <h2 className="text-2xl font-semibold mb-2">{t("key_points")}</h2>
+          {note.key_points && note.key_points.length > 0 ? (
+            <ul>
+              {(i18n.language === "en" ? note.key_points : translated.key_points || []).map((point, i) => (
+                <li key={i} style={{ marginBottom: 6 }}>• {point}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground">{t("no_key_points")}</p>
+          )}
+        </section>
+        <section style={{ marginBottom: '2rem' }}>
+          <h2 className="text-2xl font-semibold mb-2">{t("study_questions")}</h2>
+          {note.questions && note.questions.length > 0 ? (
+            <div>
+              {(i18n.language === "en" ? note.questions : translated.questions || []).map((q, i) => (
+                <div key={i} style={{ marginBottom: 10 }}>
+                  <strong>{q.question}</strong>
+                  {q.context && (
+                    <div style={{ fontSize: '0.95em', color: '#666' }}>{q.context}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground">{t("no_questions")}</p>
+          )}
+        </section>
+        <section id="note-mindmap-export" style={{ marginBottom: '2rem' }}>
+          <h2 className="text-2xl font-semibold mb-2">{t("mind_map")}</h2>
+          <div style={{ minHeight: 200, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }}>
+            <MindMap
+              summary={i18n.language === "en" ? note.summary : translated.summary}
+              keyPoints={i18n.language === "en" ? note.key_points : translated.key_points}
+            />
+          </div>
+        </section>
+      </div>
+
       {/* Gemini Chatbot for this note */}
-  {note && <div id="gemini-chat-content"><GeminiChat note={note} /></div>}
+      {note && <div id="gemini-chat-content"><GeminiChat note={note} /></div>}
     </div>
   );
 };

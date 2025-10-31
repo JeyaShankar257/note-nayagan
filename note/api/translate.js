@@ -127,3 +127,50 @@ app.post('/api/gemini-chat', async (req, res) => {
     res.status(500).json({ error: 'Chat failed', details: err.message });
   }
 });
+
+// Gemini Mind Map Generation endpoint
+app.post('/api/gemini-mindmap', async (req, res) => {
+  const { note } = req.body;
+  if (!note || typeof note !== 'string' || note.length < 10) {
+    return res.status(400).json({ error: 'Missing or invalid note content.' });
+  }
+  try {
+    // Prompt Gemini to generate a mind map structure
+    const prompt = `Given the following note, generate a JSON object with two fields: 'summary' (a concise summary of the note, max 2 sentences) and 'key_points' (an array of 5-10 key points for a mind map, each as a short phrase). Respond ONLY with valid JSON.\n\nNote:\n${note}`;
+    const contents = [
+      {
+        role: 'user',
+        parts: [{ text: prompt }]
+      }
+    ];
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents }),
+      }
+    );
+    const geminiData = await geminiRes.json();
+    if (!geminiRes.ok) {
+      return res.status(geminiRes.status).json({ error: geminiData.error || 'Mind map generation failed' });
+    }
+    // Try to extract JSON from Gemini's response
+    const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    let result = null;
+    try {
+      // Sometimes Gemini returns markdown code block, strip it if present
+      const jsonText = text.replace(/^```json|```$/g, '').trim();
+      result = JSON.parse(jsonText);
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to parse Gemini response as JSON', raw: text });
+    }
+    if (!result || typeof result !== 'object' || !result.summary || !Array.isArray(result.key_points)) {
+      return res.status(500).json({ error: 'Gemini response missing required fields', raw: result });
+    }
+    res.json({ summary: result.summary, key_points: result.key_points });
+  } catch (err) {
+    console.error('Gemini mind map error:', err);
+    res.status(500).json({ error: 'Mind map generation failed', details: err.message });
+  }
+});
