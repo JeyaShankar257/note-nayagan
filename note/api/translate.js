@@ -40,21 +40,26 @@ app.post('/api/translate', async (req, res) => {
   console.log("Received body:", req.body);
   const cacheKey = `${text}::${targetLang}`;
   if (translationCache[cacheKey]) {
+    console.log(`[CACHE HIT] ${cacheKey}`);
     return res.json({ translatedText: translationCache[cacheKey] });
   }
+  console.log(`[QUEUE] Adding translation job for: '${text}' to '${targetLang}'`);
   enqueueTranslationJob(async () => {
     try {
-      // Call Python microservice
+      console.log(`[PYTHON REQUEST] Sending to microservice:`, { text, targetLang });
       const pyRes = await fetch('http://127.0.0.1:5001/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, targetLang })
       });
+      console.log(`[PYTHON RESPONSE] Status: ${pyRes.status}`);
       if (!pyRes.ok) {
         const errData = await pyRes.json().catch(() => ({}));
+        console.error('[PYTHON ERROR]', errData);
         throw new Error(errData.error || 'Python translation service failed');
       }
       const data = await pyRes.json();
+      console.log(`[PYTHON RESPONSE DATA]`, data);
       const translatedText = data.translatedText || '';
       translationCache[cacheKey] = translatedText;
       res.json({ translatedText });
