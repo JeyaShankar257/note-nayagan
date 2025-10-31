@@ -1,0 +1,4 @@
+project_id = "qaikbbgclwrynegunfuf"
+
+[functions.process-lecture]
+verify_jwt = true
