@@ -145,7 +145,7 @@ const NoteDetail = () => {
     }
     setTranslating(true);
     const translateViaApi = async (text, targetLang) => {
-      const res = await fetch("http://localhost:3001/api/translate", {
+      const res = await fetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, targetLang })

@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, LogOut, Plus, FileText, Calendar, Trash2 } from "lucide-react";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 
@@ -103,7 +104,7 @@ const Dashboard = () => {
           </div>
         </div>
       </header>
-
+      <LanguageSwitcher />
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8">
@@ -124,7 +125,7 @@ const Dashboard = () => {
               <p className="text-muted-foreground mb-6">
                 Upload your first lecture to get started with AI-generated notes
               </p>
-              <Button onClick={() => navigate("/upload")}>
+              <Button onClick={() => navigate("/upload")}>\
                 <Plus className="h-4 w-4 mr-2" />
                 Create Your First Note
               </Button>

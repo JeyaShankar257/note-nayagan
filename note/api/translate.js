@@ -1,5 +1,6 @@
 import express from 'express';
 import fetch from 'node-fetch';
+// import { GoogleTranslator } from 'deep-translator';
 import cors from 'cors';
 
 
@@ -41,36 +42,20 @@ app.post('/api/translate', async (req, res) => {
   if (translationCache[cacheKey]) {
     return res.json({ translatedText: translationCache[cacheKey] });
   }
-  // Enqueue the translation job
   enqueueTranslationJob(async () => {
     try {
-      const geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `Translate the following text to ${targetLang}:\n${text}`,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
-      );
-      const geminiData = await geminiRes.json();
-      console.log("Gemini API status:", geminiRes.status);
-      console.log("Gemini API response:", geminiData);
-      if (!geminiRes.ok) {
-        res.status(geminiRes.status).json({ error: geminiData.error || "Translation failed" });
-        return;
+      // Call Python microservice
+      const pyRes = await fetch('http://127.0.0.1:5001/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, targetLang })
+      });
+      if (!pyRes.ok) {
+        const errData = await pyRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'Python translation service failed');
       }
-      const translatedText =
-        geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const data = await pyRes.json();
+      const translatedText = data.translatedText || '';
       translationCache[cacheKey] = translatedText;
       res.json({ translatedText });
     } catch (err) {
@@ -101,10 +86,15 @@ app.post('/api/gemini-chat', async (req, res) => {
   }
   try {
     // Convert messages to Gemini API format
+    // Only allow 'user' and 'model' roles for Gemini
+    // Convert 'assistant' -> 'model', ignore 'system'
     const geminiMessages = messages
       .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({ role: m.role, parts: [{ text: m.content }] }));
-    // Add system prompt if present
+      .map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
+      }));
+    // Optionally, prepend a system prompt as a 'user' message if present
     const systemMsg = messages.find(m => m.role === 'system');
     const contents = systemMsg
       ? [{ role: 'user', parts: [{ text: systemMsg.content }] }, ...geminiMessages]
@@ -119,6 +109,8 @@ app.post('/api/gemini-chat', async (req, res) => {
       }
     );
     const geminiData = await geminiRes.json();
+    console.log('Gemini API status:', geminiRes.status);
+    console.log('Gemini API response:', JSON.stringify(geminiData, null, 2));
     if (!geminiRes.ok) {
       return res.status(geminiRes.status).json({ error: geminiData.error || 'Chat failed' });
     }
@@ -127,6 +119,6 @@ app.post('/api/gemini-chat', async (req, res) => {
     res.json({ reply });
   } catch (err) {
     console.error('Gemini chat error:', err);
-    res.status(500).json({ error: 'Chat failed' });
+    res.status(500).json({ error: 'Chat failed', details: err.message });
   }
 });
